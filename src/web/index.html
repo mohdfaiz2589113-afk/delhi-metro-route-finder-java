@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Delhi Metro Route Finder</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes slideDown { from { max-height: 0; opacity: 0; } to { max-height: 500px; opacity: 1; } }
+        .fade-in { animation: fadeIn 0.5s ease-out forwards; }
+        .pulse-loading { animation: pulse 1.5s ease-in-out infinite; }
+        .slide-down { animation: slideDown 0.3s ease-out forwards; overflow: hidden; }
+        .dropdown-container { position: relative; }
+        .dropdown-list {
+            position: absolute; z-index: 50; width: 100%; max-height: 260px;
+            overflow-y: auto; background: #1f2937; border: 1px solid #374151;
+            border-radius: 0.75rem; margin-top: 4px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        }
+        .dropdown-list::-webkit-scrollbar { width: 6px; }
+        .dropdown-list::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
+        .dropdown-item { padding: 10px 14px; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: background 0.15s; }
+        .dropdown-item:hover { background: #374151; }
+        .line-badge {
+            display: inline-flex; align-items: center; padding: 2px 8px;
+            border-radius: 9999px; font-size: 0.65rem; font-weight: 600;
+            color: #000; white-space: nowrap;
+        }
+        .timeline-bar { width: 4px; min-height: 20px; }
+        .station-dot {
+            width: 14px; height: 14px; border-radius: 50%;
+            border: 3px solid; flex-shrink: 0;
+        }
+        .interchange-banner {
+            background: linear-gradient(135deg, #1e3a5f, #1e293b);
+            border-left: 4px solid #3b82f6; padding: 10px 14px;
+            border-radius: 0.5rem; margin: 4px 0;
+        }
+        .kpi-card {
+            background: #1f2937; border-radius: 1rem; padding: 1.25rem;
+            border-top: 3px solid; transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .kpi-card:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.3); }
+        .collapsible-stops { overflow: hidden; transition: max-height 0.3s ease; }
+        .collapsible-stops.collapsed { max-height: 0; }
+        .collapsible-stops.expanded { max-height: 2000px; }
+        body { background: #0f172a; }
+        * { scrollbar-width: thin; scrollbar-color: #4b5563 transparent; }
+    </style>
+</head>
+<body class="min-h-screen text-gray-100">
+
+<!-- ════════════════ HEADER ════════════════ -->
+<header class="bg-gradient-to-r from-blue-900 via-indigo-900 to-purple-900 shadow-xl">
+    <div class="max-w-7xl mx-auto px-4 py-5 sm:px-6">
+        <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">🚇 Delhi Metro Route Finder</h1>
+        <p class="text-blue-300 text-sm mt-1">Powered by Dijkstra's Algorithm &bull; Zero Dependencies</p>
+    </div>
+</header>
+
+<!-- ════════════════ MAIN LAYOUT ════════════════ -->
+<main class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- ──────────── LEFT PANEL ──────────── -->
+        <div class="lg:col-span-4">
+            <div class="bg-gray-800/80 backdrop-blur rounded-2xl p-6 shadow-lg border border-gray-700/50 sticky top-6">
+                <h2 class="text-lg font-semibold mb-5 flex items-center gap-2">
+                    <span class="bg-blue-600 w-2 h-6 rounded-full"></span> Plan Your Journey
+                </h2>
+
+                <!-- Source Station -->
+                <div class="mb-4 dropdown-container">
+                    <label class="block text-sm font-medium text-gray-400 mb-1.5">From Station</label>
+                    <input type="text" id="sourceInput" placeholder="Search source station..."
+                           autocomplete="off"
+                           class="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                           oninput="filterStations('source')" onfocus="showDropdown('source')">
+                    <input type="hidden" id="sourceValue">
+                    <div id="sourceDropdown" class="dropdown-list hidden"></div>
+                </div>
+
+                <!-- Swap Button -->
+                <div class="flex justify-center my-2">
+                    <button onclick="swapStations()" title="Swap stations"
+                            class="bg-gray-700 hover:bg-gray-600 text-white w-10 h-10 rounded-full flex items-center justify-center transition-all hover:rotate-180 duration-300 text-lg font-bold">
+                        ⇅
+                    </button>
+                </div>
+
+                <!-- Destination Station -->
+                <div class="mb-5 dropdown-container">
+                    <label class="block text-sm font-medium text-gray-400 mb-1.5">To Station</label>
+                    <input type="text" id="destInput" placeholder="Search destination station..."
+                           autocomplete="off"
+                           class="w-full bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                           oninput="filterStations('dest')" onfocus="showDropdown('dest')">
+                    <input type="hidden" id="destValue">
+                    <div id="destDropdown" class="dropdown-list hidden"></div>
+                </div>
+
+                <!-- Optimization Mode -->
+                <div class="mb-5">
+                    <label class="block text-sm font-medium text-gray-400 mb-2">Optimization Mode</label>
+                    <div class="flex bg-gray-900 rounded-xl p-1 gap-1">
+                        <button id="modeDistance" onclick="setMode('SHORTEST_DISTANCE')"
+                                class="flex-1 py-2.5 px-3 rounded-lg text-sm font-medium transition-all bg-blue-600 text-white">
+                            📏 Shortest Distance
+                        </button>
+                        <button id="modeInterchange" onclick="setMode('MINIMUM_INTERCHANGES')"
+                                class="flex-1 py-2.5 px-3 rounded-lg text-sm font-medium transition-all text-gray-400 hover:text-white">
+                            🔄 Min Interchanges
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Sunday Toggle -->
+                <div class="mb-6 flex items-center justify-between">
+                    <label class="text-sm font-medium text-gray-400">Sunday / Holiday Fare</label>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="sundayToggle" class="sr-only peer">
+                        <div class="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:bg-orange-500 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
+                    </label>
+                </div>
+
+                <!-- Find Route Button -->
+                <button id="findRouteBtn" onclick="findRoute()"
+                        class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold py-3.5 px-6 rounded-xl transition-all shadow-lg hover:shadow-blue-500/25 flex items-center justify-center gap-2 text-base">
+                    <span id="btnText">🔍 Find Route</span>
+                    <svg id="btnSpinner" class="hidden animate-spin h-5 w-5" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                    </svg>
+                </button>
+
+                <!-- Error Message -->
+                <div id="errorMsg" class="hidden mt-3 p-3 bg-red-900/50 border border-red-700 rounded-xl text-red-300 text-sm"></div>
+            </div>
+        </div>
+
+        <!-- ──────────── RIGHT PANEL ──────────── -->
+        <div class="lg:col-span-8" id="resultsPanel">
+            <!-- Empty State -->
+            <div id="emptyState" class="flex flex-col items-center justify-center py-20 text-gray-500">
+                <div class="text-6xl mb-4">🗺️</div>
+                <h3 class="text-xl font-semibold text-gray-400">Plan Your Metro Journey</h3>
+                <p class="text-sm mt-2 text-center max-w-sm">Select your source and destination stations, then click "Find Route" to get the optimal path with fare details.</p>
+            </div>
+
+            <!-- Results Container (hidden initially) -->
+            <div id="resultsContainer" class="hidden space-y-6">
+
+                <!-- KPI Cards -->
+                <div id="kpiCards" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 fade-in"></div>
+
+                <!-- Route Timeline -->
+                <div id="routeTimeline" class="bg-gray-800/80 backdrop-blur rounded-2xl p-6 shadow-lg border border-gray-700/50 fade-in"></div>
+
+                <!-- Step-by-Step Instructions -->
+                <div id="instructions" class="bg-gray-800/80 backdrop-blur rounded-2xl p-6 shadow-lg border border-gray-700/50 fade-in"></div>
+
+                <!-- Algorithm Telemetry -->
+                <div id="telemetry" class="bg-gray-800/80 backdrop-blur rounded-2xl p-6 shadow-lg border border-cyan-900/50 border-l-4 border-l-cyan-500 fade-in"></div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<!-- ════════════════ FOOTER ════════════════ -->
+<footer class="border-t border-gray-800 mt-12">
+    <div class="max-w-7xl mx-auto px-4 py-6 text-center text-gray-500 text-sm">
+        Delhi Metro Route Finder — Built with ❤️ using Java &amp; Dijkstra's Algorithm
+    </div>
+</footer>
+
+<!-- ════════════════ JAVASCRIPT ════════════════ -->
+<script>
+let allStations = [];
+let selectedMode = 'SHORTEST_DISTANCE';
+
+// ── Init ─────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        const res = await fetch('/api/stations');
+        allStations = await res.json();
+        allStations.sort((a, b) => a.name.localeCompare(b.name));
+    } catch (e) {
+        console.error('Failed to load stations', e);
+    }
+
+    // Close dropdowns on outside click
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.dropdown-container')) {
+            document.getElementById('sourceDropdown').classList.add('hidden');
+            document.getElementById('destDropdown').classList.add('hidden');
+        }
+    });
+});
+
+// ── Station Dropdowns ────────────────────────────────────────────────
+function showDropdown(type) {
+    filterStations(type);
+    document.getElementById(type + 'Dropdown').classList.remove('hidden');
+}
+
+function filterStations(type) {
+    const input = document.getElementById(type === 'source' ? 'sourceInput' : 'destInput');
+    const dropdown = document.getElementById(type === 'source' ? 'sourceDropdown' : 'destDropdown');
+    const query = input.value.toLowerCase().trim();
+
+    const filtered = query
+        ? allStations.filter(s => s.name.toLowerCase().includes(query))
+        : allStations;
+
+    dropdown.innerHTML = '';
+    filtered.forEach(station => {
+        const div = document.createElement('div');
+        div.className = 'dropdown-item';
+        div.innerHTML = `
+            <span class="flex-1">${station.interchange ? '🔄 ' : ''}${station.name}</span>
+            <span class="flex gap-1">${station.lines.map(l => `<span class="line-badge" style="background:${l.hexColor}">${l.displayName.replace(' Line','')}</span>`).join('')}</span>
+        `;
+        div.onclick = () => selectStation(type, station);
+        dropdown.appendChild(div);
+    });
+
+    dropdown.classList.remove('hidden');
+}
+
+function selectStation(type, station) {
+    const input = document.getElementById(type === 'source' ? 'sourceInput' : 'destInput');
+    const hidden = document.getElementById(type === 'source' ? 'sourceValue' : 'destValue');
+    input.value = station.name;
+    hidden.value = station.id;
+    document.getElementById(type === 'source' ? 'sourceDropdown' : 'destDropdown').classList.add('hidden');
+}
+
+function swapStations() {
+    const si = document.getElementById('sourceInput');
+    const sv = document.getElementById('sourceValue');
+    const di = document.getElementById('destInput');
+    const dv = document.getElementById('destValue');
+    [si.value, di.value] = [di.value, si.value];
+    [sv.value, dv.value] = [dv.value, sv.value];
+}
+
+// ── Mode Toggle ──────────────────────────────────────────────────────
+function setMode(mode) {
+    selectedMode = mode;
+    const btnDist = document.getElementById('modeDistance');
+    const btnInt = document.getElementById('modeInterchange');
+    if (mode === 'SHORTEST_DISTANCE') {
+        btnDist.className = 'flex-1 py-2.5 px-3 rounded-lg text-sm font-medium transition-all bg-blue-600 text-white';
+        btnInt.className = 'flex-1 py-2.5 px-3 rounded-lg text-sm font-medium transition-all text-gray-400 hover:text-white';
+    } else {
+        btnInt.className = 'flex-1 py-2.5 px-3 rounded-lg text-sm font-medium transition-all bg-purple-600 text-white';
+        btnDist.className = 'flex-1 py-2.5 px-3 rounded-lg text-sm font-medium transition-all text-gray-400 hover:text-white';
+    }
+}
+
+// ── Find Route ───────────────────────────────────────────────────────
+async function findRoute() {
+    const from = document.getElementById('sourceValue').value;
+    const to = document.getElementById('destValue').value;
+    const sunday = document.getElementById('sundayToggle').checked;
+    const errDiv = document.getElementById('errorMsg');
+
+    errDiv.classList.add('hidden');
+
+    if (!from || !to) {
+        errDiv.textContent = '⚠️ Please select both source and destination stations.';
+        errDiv.classList.remove('hidden');
+        return;
+    }
+    if (from === to) {
+        errDiv.textContent = '⚠️ Source and destination cannot be the same.';
+        errDiv.classList.remove('hidden');
+        return;
+    }
+
+    // Loading state
+    const btn = document.getElementById('findRouteBtn');
+    const btnText = document.getElementById('btnText');
+    const spinner = document.getElementById('btnSpinner');
+    btn.disabled = true;
+    btnText.textContent = 'Finding Route...';
+    spinner.classList.remove('hidden');
+
+    try {
+        const url = `/api/route?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&mode=${selectedMode}&sunday=${sunday}`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (data.error) {
+            errDiv.textContent = '❌ ' + data.error;
+            errDiv.classList.remove('hidden');
+            return;
+        }
+
+        renderResults(data, sunday);
+
+    } catch (e) {
+        errDiv.textContent = '❌ Failed to fetch route. Is the server running?';
+        errDiv.classList.remove('hidden');
+        console.error(e);
+    } finally {
+        btn.disabled = false;
+        btnText.textContent = '🔍 Find Route';
+        spinner.classList.add('hidden');
+    }
+}
+
+// ── Render Results ───────────────────────────────────────────────────
+function renderResults(data, sunday) {
+    document.getElementById('emptyState').classList.add('hidden');
+    document.getElementById('resultsContainer').classList.remove('hidden');
+
+    renderKPICards(data, sunday);
+    renderTimeline(data);
+    renderInstructions(data);
+    renderTelemetry(data);
+
+    document.getElementById('resultsContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function renderKPICards(data, sunday) {
+    const container = document.getElementById('kpiCards');
+    const fare = sunday ? data.sundayFare : data.tokenFare;
+    const fareLabel = sunday ? 'Sunday Fare' : 'Token Fare';
+    const cards = [
+        { icon: '🎫', label: fareLabel, value: `₹${fare}`, color: '#3b82f6' },
+        { icon: '💳', label: 'Smart Card', value: `₹${data.smartCardFare}`, color: '#10b981' },
+        { icon: '📏', label: 'Distance', value: `${data.totalDistanceKm} km`, color: '#f59e0b' },
+        { icon: '⏱️', label: 'Est. Time', value: `${data.totalTimeMin} mins`, color: '#8b5cf6' },
+        { icon: '🔄', label: 'Interchanges', value: `${data.interchanges.length}`, color: '#ef4444' },
+    ];
+
+    container.innerHTML = cards.map(c => `
+        <div class="kpi-card" style="border-top-color: ${c.color}">
+            <div class="text-2xl mb-1">${c.icon}</div>
+            <div class="text-2xl font-bold text-white">${c.value}</div>
+            <div class="text-xs text-gray-400 mt-1">${c.label}</div>
+        </div>
+    `).join('');
+}
+
+function renderTimeline(data) {
+    const container = document.getElementById('routeTimeline');
+    let html = '<h3 class="text-lg font-semibold mb-4 flex items-center gap-2"><span class="bg-green-500 w-2 h-6 rounded-full"></span>Route Map</h3>';
+
+    if (!data.lineSegments || data.lineSegments.length === 0) {
+        html += '<p class="text-gray-500">No route data available.</p>';
+        container.innerHTML = html;
+        return;
+    }
+
+    html += '<div class="space-y-0">';
+
+    data.lineSegments.forEach((segment, segIdx) => {
+        const line = segment.line;
+        const stations = segment.stations;
+        const isLastSegment = segIdx === data.lineSegments.length - 1;
+
+        // Line badge header
+        html += `<div class="flex items-center gap-3 mb-2 ${segIdx > 0 ? 'mt-1' : ''}">
+            <span class="line-badge text-xs" style="background:${line.hexColor}">${line.displayName}</span>
+        </div>`;
+
+        // Interchange banner at start (if not first segment)
+        if (segIdx > 0) {
+            const prevLine = data.lineSegments[segIdx - 1].line;
+            const interchangeStation = stations[0].name;
+            html += `<div class="interchange-banner mb-2 ml-1.5">
+                <div class="text-sm font-medium text-blue-300">🔄 Transfer at ${interchangeStation}</div>
+                <div class="text-xs text-gray-400">Change from <span style="color:${prevLine.hexColor}">${prevLine.displayName}</span> to <span style="color:${line.hexColor}">${line.displayName}</span></div>
+            </div>`;
+        }
+
+        stations.forEach((station, stIdx) => {
+            const isFirst = segIdx === 0 && stIdx === 0;
+            const isLast = isLastSegment && stIdx === stations.length - 1;
+            const isIntermediate = !isFirst && !isLast && stIdx > 0 && stIdx < stations.length - 1;
+            const isInterchange = station.interchange && (stIdx === 0 || stIdx === stations.length - 1);
+
+            // Skip first station in subsequent segments (already shown as last in previous)
+            if (segIdx > 0 && stIdx === 0) return;
+
+            // Determine if this is a collapsible intermediate stop
+            const intermediateStations = stations.slice(1, -1);
+            const hasIntermediates = intermediateStations.length > 1;
+
+            if (stIdx === 1 && hasIntermediates) {
+                // Collapse toggle
+                const collapseId = `collapse-${segIdx}`;
+                html += `<div class="flex items-start gap-3 ml-1.5 cursor-pointer hover:bg-gray-700/30 rounded-lg px-2 py-0.5 transition" onclick="toggleCollapse('${collapseId}', this)">
+                    <div class="flex flex-col items-center">
+                        <div class="timeline-bar" style="background:${line.hexColor}; height: 8px;"></div>
+                        <div class="station-dot bg-gray-900" style="border-color:${line.hexColor}; width:10px; height:10px;"></div>
+                        <div class="timeline-bar" style="background:${line.hexColor}; height: 8px;"></div>
+                    </div>
+                    <div class="flex items-center gap-2 py-1">
+                        <span class="text-sm text-gray-300">${station.name}</span>
+                        <span class="text-xs text-gray-500 bg-gray-700 px-2 py-0.5 rounded-full collapse-label">▼ ${intermediateStations.length - 1} more stops</span>
+                    </div>
+                </div>`;
+                html += `<div id="${collapseId}" class="collapsible-stops collapsed">`;
+            } else if (isIntermediate && hasIntermediates && stIdx > 1 && stIdx < stations.length - 1) {
+                // Intermediate stop inside collapsible
+                html += `<div class="flex items-start gap-3 ml-1.5 px-2 py-0.5">
+                    <div class="flex flex-col items-center">
+                        <div class="timeline-bar" style="background:${line.hexColor}; height: 8px;"></div>
+                        <div class="station-dot bg-gray-900" style="border-color:${line.hexColor}; width:10px; height:10px;"></div>
+                        <div class="timeline-bar" style="background:${line.hexColor}; height: 8px;"></div>
+                    </div>
+                    <span class="text-sm text-gray-400 py-1">${station.name}</span>
+                </div>`;
+            } else {
+                // Close collapsible if needed
+                if (hasIntermediates && stIdx === stations.length - 1) {
+                    html += '</div>'; // close collapsible
+                }
+
+                // First, last, or single intermediate
+                let marker = '';
+                let nameClass = 'text-gray-300';
+                let dotSize = 'width:12px; height:12px;';
+                if (isFirst) { marker = '🟢 '; nameClass = 'text-green-400 font-semibold'; dotSize = 'width:16px; height:16px;'; }
+                if (isLast) { marker = '🔴 '; nameClass = 'text-red-400 font-semibold'; dotSize = 'width:16px; height:16px;'; }
+
+                const showBar = !(isLast);
+                html += `<div class="flex items-start gap-3 ml-1.5 px-2 py-0.5">
+                    <div class="flex flex-col items-center">
+                        ${!isFirst ? `<div class="timeline-bar" style="background:${line.hexColor}; height: 12px;"></div>` : ''}
+                        <div class="station-dot bg-gray-900" style="border-color:${line.hexColor}; ${dotSize}"></div>
+                        ${showBar ? `<div class="timeline-bar" style="background:${line.hexColor}; height: 12px;"></div>` : ''}
+                    </div>
+                    <span class="text-sm ${nameClass} py-1">${marker}${station.name}${isFirst ? ' <span class=&quot;text-xs text-gray-500&quot;>(Start)</span>' : ''}${isLast ? ' <span class=&quot;text-xs text-gray-500&quot;>(End)</span>' : ''}</span>
+                </div>`;
+            }
+        });
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function toggleCollapse(id, trigger) {
+    const el = document.getElementById(id);
+    const label = trigger.querySelector('.collapse-label');
+    if (el.classList.contains('collapsed')) {
+        el.classList.remove('collapsed');
+        el.classList.add('expanded');
+        if (label) label.textContent = label.textContent.replace('▼', '▲');
+    } else {
+        el.classList.add('collapsed');
+        el.classList.remove('expanded');
+        if (label) label.textContent = label.textContent.replace('▲', '▼');
+    }
+}
+
+function renderInstructions(data) {
+    const container = document.getElementById('instructions');
+    let html = '<h3 class="text-lg font-semibold mb-4 flex items-center gap-2"><span class="bg-indigo-500 w-2 h-6 rounded-full"></span>Step-by-Step Directions</h3>';
+    html += '<ol class="space-y-2">';
+    data.instructions.forEach((inst, i) => {
+        let icon = '📍';
+        if (inst.includes('Board')) icon = '🚇';
+        if (inst.includes('Change')) icon = '🔄';
+        if (inst.includes('Alight')) icon = '🏁';
+        html += `<li class="flex items-start gap-3 bg-gray-900/50 rounded-xl px-4 py-3">
+            <span class="text-lg">${icon}</span>
+            <div>
+                <span class="text-xs text-gray-500 font-mono">Step ${i + 1}</span>
+                <div class="text-sm text-gray-300">${inst}</div>
+            </div>
+        </li>`;
+    });
+    html += '</ol>';
+    container.innerHTML = html;
+}
+
+function renderTelemetry(data) {
+    const container = document.getElementById('telemetry');
+    const modeName = selectedMode === 'SHORTEST_DISTANCE' ? 'Shortest Distance' : 'Minimum Interchanges';
+    container.innerHTML = `
+        <h3 class="text-lg font-semibold mb-1 flex items-center gap-2 text-cyan-400">
+            <span class="bg-cyan-500 w-2 h-6 rounded-full"></span>
+            Algorithm Telemetry — Dijkstra's Shortest Path
+        </h3>
+        <p class="text-xs text-gray-500 mb-4">Mode: ${modeName}</p>
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            <div class="bg-gray-900/70 rounded-xl p-3 text-center">
+                <div class="text-xs text-gray-500 mb-1">📊 Nodes Visited</div>
+                <div class="text-xl font-bold text-cyan-400">${data.nodesVisited}</div>
+            </div>
+            <div class="bg-gray-900/70 rounded-xl p-3 text-center">
+                <div class="text-xs text-gray-500 mb-1">⚡ Relaxations</div>
+                <div class="text-xl font-bold text-yellow-400">${data.relaxationsPerformed}</div>
+            </div>
+            <div class="bg-gray-900/70 rounded-xl p-3 text-center">
+                <div class="text-xs text-gray-500 mb-1">⏱️ Exec Time</div>
+                <div class="text-xl font-bold text-green-400">${data.executionTimeMicros} μs</div>
+            </div>
+            <div class="bg-gray-900/70 rounded-xl p-3 text-center">
+                <div class="text-xs text-gray-500 mb-1">📐 Time Complexity</div>
+                <div class="text-lg font-bold text-purple-400">O((V+E)logV)</div>
+            </div>
+            <div class="bg-gray-900/70 rounded-xl p-3 text-center">
+                <div class="text-xs text-gray-500 mb-1">💾 Space Complexity</div>
+                <div class="text-lg font-bold text-pink-400">O(V + E)</div>
+            </div>
+        </div>
+        <div class="mt-4 text-xs text-gray-600 bg-gray-900/40 rounded-lg p-3">
+            <strong class="text-gray-500">ℹ️ What do these mean?</strong><br>
+            <span class="text-gray-500"><b>Nodes Visited</b> = stations dequeued from the min-heap (priority queue).<br>
+            <b>Relaxations</b> = edge relaxation operations where a shorter path was found.<br>
+            <b>Exec Time</b> = wall-clock time for the Dijkstra computation on the JVM.<br>
+            V = ${data.nodesVisited > 0 ? 'vertices (stations)' : '—'}, E = edges (connections between stations).</span>
+        </div>
+    `;
+}
+</script>
+</body>
+</html>
